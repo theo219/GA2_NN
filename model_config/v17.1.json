@@ -28,7 +28,6 @@
             "data_format":"channels_last"
         },
         "Flatten":{
-
         },
         "Dense_1":{
             "units":64,
