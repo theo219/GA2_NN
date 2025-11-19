@@ -2,22 +2,24 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-logs_DQL_17 = pd.read_csv('model_logs/v17.1.csv')
+logs_pytorch = pd.read_csv('model_logs/v17.1.csv')
+logs_tf = pd.read_csv('model_logs/v17.1_tf.csv')
 
-fig, axs = plt.subplots(1, 1, figsize=(8, 8))
+colors = {
+    "length_mean" : ("bisque","red"),
+    "reward_mean" : ("skyblue","blue"),
+    "loss" : ("lightgreen","green"),
+}
 
-axs.plot(logs_DQL_17['iteration'][:200], logs_DQL_17['length_mean'][:200],
-        label='Batch Size 64', color='skyblue')
-axs.plot(logs_DQL_17['iteration'][:200], logs_DQL_17['length_mean'][:200],
-        label='Batch Size 128', color='bisque')
+for idx, category in zip(['length_mean','reward_mean','loss'],['Mean Length', 'Mean Reward', 'Loss']):
+    fig, axs = plt.subplots(1, 1, figsize=(8, 8))
 
-axs.plot(logs_DQL_17['iteration'][9:200], logs_DQL_17['reward_mean'][9:200],
-        label='Batch Size 64 Moving Average', color='blue')
-axs.plot(logs_DQL_17['iteration'][9:200], logs_DQL_17['reward_mean'][9:200],
-        label='Batch Size 128 Moving Average', color='red')
+    axs.plot(logs_tf['iteration'], logs_tf[idx],
+         label='Tensorflow', color=colors[idx][0])
 
-axs.set_ylabel('Mean Length')
-axs.set_xlabel('Iteration')
+    axs.plot(logs_pytorch['iteration'], logs_pytorch[idx],
+         label='Pytorch', color=colors[idx][1])
 
-plt.legend()
-plt.show()
+    axs.set(xlabel='Iteration', ylabel=category)
+    plt.legend()
+    plt.show()

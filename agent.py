@@ -612,7 +612,10 @@ class CNNModel(nn.Module):
         return self.model(x)
 
     def init_optimizer(self):
-        self.optimizer = RMSprop(self.parameters(),lr=0.0005, alpha=0.9, eps=1e-7) # default parameters for keras RMSprop loss function
+        """
+        default parameters for keras RMSprop loss function
+        """
+        self.optimizer = RMSprop(self.parameters(),lr=0.0005, alpha=0.9, eps=1e-7)
 
     def predict_on_batch(self, x):
         self.eval()
@@ -644,7 +647,8 @@ class CNNModel(nn.Module):
 
     def _init_weights(self):
         """
-        The weight initialization in keras is different from the one in pytorch. That is why I am using an extra function
+        The weight initialization in keras is different from the one in pytorch.
+        That is why I am using an extra function
         """
         for layer in self._layers:
             if hasattr(layer,'weight'):
