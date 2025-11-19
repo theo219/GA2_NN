@@ -1,12 +1,7 @@
 '''
 script for training the agent for snake using various methods
 '''
-# run on cpu
-import os
-# os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
-import numpy as np
-from collections import deque
 import pandas as pd
 import time
 
@@ -41,15 +36,7 @@ games_eval = 8
 # setup the agent
 agent = DeepQLearningAgent(board_size=board_size, frames=frames, n_actions=n_actions, 
                            buffer_size=buffer_size, version=version)
-# agent = PolicyGradientAgent(board_size=board_size, frames=frames, n_actions=n_actions, 
-        # buffer_size=2000, version=version)
-# agent = AdvantageActorCriticAgent(board_size=board_size, frames=frames, n_actions=n_actions, 
-                                  # buffer_size=10000, version=version)
-# agent.print_models()
-
-# check in the same order as class hierarchy
-agent_type = 'DeepQLearningAgent'
-print('Agent is {:s}'.format(agent_type))
+print('Agent is DeepQLearningAgent')
 
 # setup the epsilon range and decay rate for epsilon
 # define rewrad type and update frequency, see utils for more details
@@ -58,35 +45,20 @@ reward_type = 'current'
 sample_actions = False
 n_games_training = 8*16
 decay = 0.97
-if(supervised):
-    # lower the epsilon since some starting policy has already been trained
-    epsilon = 0.01
-    # load the existing model from a supervised method
-    # or some other pretrained model
-    agent.load_model(file_path='models/{:s}'.format(version))
-    # agent.set_weights_trainable()
-
-# decay = np.exp(np.log((epsilon_end/epsilon))/episodes)
 
 # use only for DeepQLearningAgent
 # play some games initially to fill the buffer
 # or load from an existing buffer (supervised)
-if(supervised):
-    try:
-        agent.load_buffer(file_path='models/{:s}'.format(version), iteration=1)
-    except FileNotFoundError:
-        pass
-else:
-    # setup the environment
-    games = 512
-    env = SnakeNumpy(board_size=board_size, frames=frames,
-                     max_time_limit=max_time_limit, games=games,
-                     frame_mode=True, obstacles=obstacles, version=version)
-    ct = time.time()
-    _ = play_game2(env, agent, n_actions, n_games=games, record=True,
-                   epsilon=epsilon, verbose=True, reset_seed=False,
-                   frame_mode=True, total_frames=games*64)
-    print('Playing {:d} frames took {:.2f}s'.format(games*64, time.time()-ct))
+# setup the environment
+games = 512
+env = SnakeNumpy(board_size=board_size, frames=frames,
+                 max_time_limit=max_time_limit, games=games,
+                 frame_mode=True, obstacles=obstacles, version=version)
+ct = time.time()
+_ = play_game2(env, agent, n_actions, n_games=games, record=True,
+               epsilon=epsilon, verbose=True, reset_seed=False,
+               frame_mode=True, total_frames=games*64)
+print('Playing {:d} frames took {:.2f}s'.format(games*64, time.time()-ct))
 
 env = SnakeNumpy(board_size=board_size, frames=frames, 
             max_time_limit=max_time_limit, games=n_games_training,
@@ -99,15 +71,14 @@ env2 = SnakeNumpy(board_size=board_size, frames=frames,
 model_logs = {'iteration':[], 'reward_mean':[],
               'length_mean':[], 'games':[], 'loss':[]}
 for index in tqdm(range(episodes)):
-    if(agent_type in ['DeepQLearningAgent']):
-        # make small changes to the buffer and slowly train
-        _, _, _ = play_game2(env, agent, n_actions, epsilon=epsilon,
-                       n_games=n_games_training, record=True,
-                       sample_actions=sample_actions, reward_type=reward_type,
-                       frame_mode=True, total_frames=n_games_training, 
-                       stateful=True)
-        loss = agent.train_agent(batch_size=64,
-                                 num_games=n_games_training, reward_clip=True)
+    # make small changes to the buffer and slowly train
+    _, _, _ = play_game2(env, agent, n_actions, epsilon=epsilon,
+                   n_games=n_games_training, record=True,
+                   sample_actions=sample_actions, reward_type=reward_type,
+                   frame_mode=True, total_frames=n_games_training,
+                   stateful=True)
+    loss = agent.train_agent(batch_size=64,
+                             num_games=n_games_training, reward_clip=True)
 
     # check performance every once in a while
     if((index+1)%log_frequency == 0):

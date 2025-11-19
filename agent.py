@@ -116,13 +116,13 @@ class Agent():
         version : str, optional except NN based models
             path to the model architecture json
         """
-        self._board_size = board_size
-        self._n_frames = frames
+        self._board_size = board_size if board_size is not None else 10
+        self._n_frames = frames if frames is not None else 2
         self._buffer_size = buffer_size
         self._n_actions = n_actions
         self._gamma = gamma
         self._use_target_net = use_target_net
-        self._input_shape = (self._n_frames, self._board_size, self._board_size)
+        self._input_shape = (self._board_size, self._board_size, self._n_frames)
         # reset buffer also initializes the buffer
         self.reset_buffer()
         self._board_grid = np.arange(0, self._board_size ** 2) \
@@ -305,10 +305,11 @@ class DeepQLearningAgent(Agent):
         board : Numpy array
             Processed and normalized board
         """
-        if (board.ndim == 3):
+        if board.ndim == 3:
             board = board.reshape((1,) + self._input_shape)
-        board = board.transpose(0, 3, 1, 2)
         board = self._normalize_board(board.copy())
+        if board.shape[1] == board.shape[2]:
+            board = board.transpose((0,3,1,2))
         return board.copy()
 
     def _get_model_outputs(self, board, model=None):
@@ -381,7 +382,6 @@ class DeepQLearningAgent(Agent):
         """
         # define the input layer, shape is dependent on the board size and frames
         model = CNNModel('model_config/{:s}.json'.format(self._version))
-
         """
         input_board = Input((self._board_size, self._board_size, self._n_frames,), name='input')
         x = Conv2D(16, (3,3), activation='relu', data_format='channels_last')(input_board)
@@ -399,14 +399,6 @@ class DeepQLearningAgent(Agent):
         """
 
         return model
-
-    def set_weights_trainable(self):
-        """Set selected layers to non trainable and compile the model"""
-        for name, layer in self._model.layers:
-            layer.requires_grad = False
-        # the last dense layers should be trainable
-        self._model.get_layer('action_prev_dense').trainable = True
-        self._model.get_layer('action_values').trainable = True
 
     def get_action_proba(self, board, values=None):
         """Returns the action probability values using the DQN model
@@ -525,16 +517,17 @@ class DeepQLearningAgent(Agent):
         next_model_outputs = self._get_model_outputs(next_s, current_model)
         # our estimate of expexted future discounted reward
         discounted_reward = r + \
-            (self._gamma * np.max(np.where(legal_moves==1, next_model_outputs, -np.inf), 
+            (self._gamma * np.max(np.where(legal_moves==1, next_model_outputs, -np.inf),
                                   axis = 1)\
                                   .reshape(-1, 1)) * (1-done)
         # create the target variable, only the column with action has different value
         target = self._get_model_outputs(s)
         # we bother only with the difference in reward estimate at the selected action
+        if np.any(np.isnan(target)):
+            print(target)
         target = (1-a)*target + a*discounted_reward
         # fit
-        loss = self._model.train_on_batch(self._normalize_board(self._prepare_input(s)), target)
-        # loss = round(loss, 5)
+        loss = self._model.train_on_batch(self._prepare_input(s), target)
         return loss
 
     def update_target_net(self):
@@ -581,17 +574,23 @@ class CNNModel(nn.Module):
             if 'Conv2D' in layer:
                 out_channels = l['filters']
                 kernel_size = l['kernel_size']
-                conv_layer = nn.Conv2d(curr_dim["channels"], out_channels, kernel_size)
-                layers.append(nn.Sequential(conv_layer, get_activation(l['activation'])))
+                padding = 0
+                if l.get('padding') == 'same':
+                    padding = kernel_size[0] // 2
+                conv_layer = nn.Conv2d(curr_dim["channels"], out_channels, kernel_size, padding=padding)
+                layers.append(conv_layer)
+                layers.append(get_activation(l['activation']))
                 curr_dim["channels"] = out_channels
-                curr_dim["hw"] = int(curr_dim["hw"] - kernel_size[0] + 1)
+                if l.get('padding') != 'same':
+                    curr_dim["hw"] = int(curr_dim["hw"] - kernel_size[0] + 1)
             elif 'Flatten' in layer:
                 layers.append(nn.Flatten())
                 curr_dim["channels"] = curr_dim["channels"] * curr_dim["hw"]**2
                 curr_dim["hw"] = 1
             elif 'Dense' in layer:
                 out_channels = l['units']
-                layers.append(nn.Sequential(nn.Linear(curr_dim["channels"], out_channels), get_activation(l['activation'])))
+                layers.append(nn.Linear(curr_dim["channels"], out_channels))
+                layers.append(get_activation(l['activation']))
                 curr_dim["channels"] = out_channels
             else:
                 raise ValueError('Unknown layer type')
@@ -599,27 +598,26 @@ class CNNModel(nn.Module):
         # Add final output layer
         layers.append(nn.Linear(in_features=curr_dim["channels"], out_features=n_actions))
 
-        # Store layers with names as ModuleList for proper parameter registration
-        self.layer_list = nn.ModuleList(layers)
-        self.layer_names = []
-        for i, l in enumerate(m['model']):
-            name = m['model'][l]['name'] if 'name' in m['model'][l] else f'layer{i}'
-            self.layer_names.append(name)
-        self.layer_names.append('action_values')
         self.optimizer = None
+        self._layers = layers
+        self._init_weights()
+        self.model = nn.Sequential(*self._layers)
         self.loss_fn = mean_huber_loss
 
     def forward(self, x):
         # Convert numpy to tensor if needed
-        return nn.Sequential(*self.layer_list)(torch.Tensor(x))
+        if isinstance(x, np.ndarray):
+            x = torch.from_numpy(x).float()
+        # Apply all layers sequentially
+        return self.model(x)
 
     def init_optimizer(self):
-        self.optimizer = RMSprop(self.parameters(),lr=0.0005)
+        self.optimizer = RMSprop(self.parameters(),lr=0.0005, alpha=0.9, eps=1e-7) # default parameters for keras RMSprop loss function
 
     def predict_on_batch(self, x):
         self.eval()
         with torch.no_grad():
-            return self.forward(x).numpy()
+            return self.forward(x).detach().numpy()
 
     def train_on_batch(self, x, y):
         if self.optimizer is None:
@@ -636,7 +634,7 @@ class CNNModel(nn.Module):
         self.optimizer.zero_grad()
         output = self.forward(x)
 
-        loss = self.loss_fn(output, y)
+        loss = self.loss_fn(y, output)
 
         loss.backward()
 
@@ -644,12 +642,13 @@ class CNNModel(nn.Module):
 
         return loss.item()
 
-    def get_layer(self, layer_name):
-        for i, name in enumerate(self.layer_names):
-            if name == layer_name:
-                return self.layer_list[i]
-        raise ValueError("Layer name not found")
-
+    def _init_weights(self):
+        """
+        The weight initialization in keras is different from the one in pytorch. That is why I am using an extra function
+        """
+        for layer in self._layers:
+            if hasattr(layer,'weight'):
+                nn.init.xavier_uniform_(layer.weight)
 
 def get_activation(id):
     if id == 'relu':
